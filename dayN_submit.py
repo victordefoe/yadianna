@@ -2071,6 +2071,75 @@ new_trainset, new_trainset_lb, new_test, _ = model.fit_model(train_set, t_lb['la
 
 new_test.shape
 
+### 模型融合 ####
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier, \
+    AdaBoostClassifier
+from sklearn.tree import DecisionTreeClassifier
+from xgboost.sklearn import XGBClassifier
+
+import xgboost as xgb
+# LightGBM
+# import lightgbm as lgbm
+# CatBoost
+# import catboost as cb
+# 逻辑回归
+# import LR
+
+from sklearn.linear_model import LogisticRegression
+
+from sklearn.cross_validation import StratifiedKFold
+
+n_folds = 5
+clfs = [RandomForestClassifier(n_estimators=5, n_jobs=-1, criterion='gini'),
+        RandomForestClassifier(n_estimators=5, n_jobs=-1, criterion='entropy'),
+        ExtraTreesClassifier(n_estimators=5, n_jobs=-1, criterion='gini'),
+        ExtraTreesClassifier(n_estimators=5, n_jobs=-1, criterion='entropy'),
+        GradientBoostingClassifier(learning_rate=0.05, subsample=0.5, max_depth=6, n_estimators=5),
+        XGBClassifier(base_score=0.5, booster='gbtree', colsample_bylevel=1, colsample_bytree=1,
+                      gamma=0.1, learning_rate=0.1, max_delta_step=0, max_depth=6,
+                      min_child_weight=1, missing=None, n_estimators=300, n_jobs=6, nthread=6,
+                      objective='binary:logistic', random_state=0,
+                      reg_alpha=0, reg_lambda=1, scale_pos_weight=1, seed=None,
+                      silent=False, subsample=1)
+        ]
+
+# X, X_predict, y, y_predict = train_test_split(new_trainset, t_lb['label'], test_size=0.33, random_state=2017)
+
+X, y, X_submission = new_trainset, t_lb['label'], new_test
+
+## Creating train and test sets for blending
+dataset_blend_train = np.zeros((X.shape[0], len(clfs)))
+dataset_blend_test = np.zeros((X_submission.shape[0], len(clfs)))
+skf = list(StratifiedKFold(y, n_folds))
+
+for j, clf in enumerate(clfs):
+    print(j, clf)
+    dataset_blend_test_j = np.zeros((X_submission.shape[0], len(skf)))
+    for i, (train, test) in enumerate(skf):
+        print("Fold", i)
+        X_train = X.loc[train]
+        y_train = y.loc[train]
+        X_test = X.loc[test]
+        y_test = y.loc[test]
+        clf.fit(X_train, y_train)
+        y_submission = clf.predict_proba(X_test)[:, 1]
+        dataset_blend_train[test, j] = y_submission
+        dataset_blend_test_j[:, i] = clf.predict_proba(X_submission)[:, 1]
+    dataset_blend_test[:, j] = dataset_blend_test_j.mean(1)
+
+print("Blending.")
+clf = LogisticRegression()
+clf.fit(dataset_blend_train, y)
+y_submission = clf.predict_proba(dataset_blend_test)[:, 1]
+
+print("Linear stretch of predictions to [0,1]")
+y_submission = (y_submission - y_submission.min()) / (y_submission.max() - y_submission.min())
+
+print("Saving Results.")
+tmp = np.vstack([range(1, len(y_submission) + 1), y_submission]).T
+np.savetxt(fname='submission.csv', X=tmp, fmt='%d,%0.9f',
+           header='Id,PredictedProbability', comments='')
+
 #
 # ---------------------- 2019年9月14日23:48:56
 #
@@ -2086,6 +2155,7 @@ new_test.shape
 
 
 # In[436]:
+
 
 
 
